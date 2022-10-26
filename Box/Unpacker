@@ -1,0 +1,249 @@
+integer CHANNEL;
+key owner;
+string type;
+string color;
+
+//===========================================================
+//===========================================================
+list common=[
+"Rabbit Hand - Left",
+"Rabbit Hand - Right",
+"Rabbit Eye - Left",
+"Rabbit Eye - Right",
+
+"Rabbit jaw",
+"Rabbit Tail",
+"Rabbit Leg - Right",
+"Rabbit Leg - Left",
+"Rabbit Ear - Right",
+"Rabbit Ear - Left",
+
+"Rabbit HUD",
+"Rabbit Alpha"
+];
+
+list common_merle=[
+"Rabbit2 Hand - Left",
+"Rabbit2 Hand - Right",
+"Rabbit Eye - Left",
+"Rabbit Eye - Right",
+
+"Rabbit2 jaw",
+"Rabbit2 Tail",
+"Rabbit2 Leg - Right",
+"Rabbit2 Leg - Left",
+"Rabbit2 Ear - Right",
+"Rabbit2 Ear - Left",
+
+"Rabbit HUD",
+"Rabbit Alpha"
+];
+
+//===========================================================
+list common_accessories=[
+"Alpha Boxed",
+"Rabbit Alpha - wear with plantigrad feet",
+"Rabbit Floppy Ear - Right",
+"Rabbit Floppy Ear - Left",
+
+"Rabbit Floppy Ear - Right W/ piercings",
+"Rabbit Floppy Ear - Left W/ piercings",
+
+"Rabbit Ear - Right W/ piercings",
+"Rabbit Ear - Left W/ piercings",
+
+"Rabbit jaw W/ piercings",
+"Rabbit Cut Leg - Right",
+"Rabbit Cut Leg - Left",
+"Rabbit Leg - Left Male Based shapes",
+"Rabbit Leg - Right Male Based shapes",
+"Rabbit Plantigrad Foot - Left",
+"Rabbit Plantigrad Foot - Right"
+];
+
+
+list common_accessories_merle=[
+"Alpha Boxed",
+"Rabbit Alpha - wear with plantigrad feet",
+"Rabbit2 Floppy Ear - Right",
+"Rabbit2 Floppy Ear - Left",
+
+"Rabbit2 Floppy Ear - Right W/ piercings",
+"Rabbit2 Floppy Ear - Left W/ piercings",
+
+"Rabbit2 Ear - Right W/ piercings",
+"Rabbit2 Ear - Left W/ piercings",
+
+"Rabbit2 jaw W/ piercings",
+"Rabbit2 Cut Leg - Right",
+"Rabbit2 Cut Leg - Left",
+"Rabbit2 Leg - Left Male Based shapes",
+"Rabbit2 Leg - Right Male Based shapes",
+"Rabbit2 Plantigrad Foot - Left",
+"Rabbit2 Plantigrad Foot - Right"
+];
+
+
+
+list Gestures=[     
+    "speech gesture low 1",
+    "speech gesture low 2",
+    "speech gesture low 3",
+    "speech gesture low 4",
+    "speech gesture low 5",
+    "speech gesture low 6",
+    "speech gesture medium 1",
+    "speech gesture medium 2",
+    "speech gesture medium 3",
+    "speech gesture medium 4",
+    "speech gesture high 1",
+    "speech gesture high 2",
+    "speech gesture high 3",
+    "speech gesture high 4",
+    "speech gesture high 5"
+];
+//===================================================================
+
+list male=[
+    "Rabbit Hair - Male",
+    "Rabbit Head - Male",
+    "Rabbit Skin - Male PG",
+    "Rabbit Shape - Male"
+];
+
+list male_accessories=[
+    "Rabbit Skin - Male Mature",
+    "Rabbit Head - Male W/ piercings"
+];
+
+list male_merle=[
+    "Rabbit2 Hair - Male",
+    "Rabbit2 Head - Male",
+    "Rabbit2 Skin - Male PG",
+    "Rabbit Shape - Male"
+];
+
+list male_accessories_merle=[
+    "Rabbit2 Skin - Male Mature",
+    "Rabbit2 Head - Male W/ piercings"
+];
+
+//===================================================================
+list female=[
+    "Rabbit Hair - Female",
+    "Rabbit Head - Female",
+    "Rabbit Skin - Female PG",
+    "Rabbit Shape - Female"
+];
+
+list female_accessories=[
+    "Rabbit Skin - Female Mature",
+    "Rabbit Head - Female W/ piercings"
+];
+
+list female_merle=[
+    "Rabbit2 Hair - Female",
+    "Rabbit2 Head - Female",
+    "Rabbit2 Skin - Female PG",
+    "Rabbit Shape - Female"
+];
+
+list female_accessories_merle=[
+    "Rabbit2 Skin - Female Mature",
+    "Rabbit2 Head - Female W/ piercings"
+];
+
+//============================================================
+//============================================================
+
+integer check(list inventory){
+    integer i=llGetListLength(inventory);
+    integer j=i;
+    integer ok=TRUE;
+    while(--i>=0){
+        if(llGetInventoryType(llList2String(inventory, i))==INVENTORY_NONE){ 
+            ok=FALSE;
+            llOwnerSay("Missing: "+llList2String(inventory, i));
+        }
+        float pack=100.0-((float)i/(float)j)*100.0;
+        llSetText("unpacking ("+(string)((integer)pack)+"%)", <1.0, 1.0, 1.0>, 1.0);
+    }
+    llSetText("Click me to unpack\n"+llGetObjectName(), <1.0, 1.0, 1.0>, 1.0);
+    return ok;
+}
+
+//============================================================
+//============================================================
+default
+{
+    state_entry(){
+        CHANNEL=(integer)llFrand(100000)+1;
+        owner=llGetOwner();
+        
+        llListen(CHANNEL, "", owner, "");
+        llSetText("Click me to unpack\n"+llGetObjectName(), <1.0, 1.0, 1.0>, 1.0);
+        
+        list l=llParseString2List(llGetObjectDesc(), [" "], []);
+        type  =llList2String(l, 0);
+        color =llList2String(l, 1);
+        
+        llSetColor(<1.0, 1.0, 1.0>, ALL_SIDES);
+        
+        if(check(
+            common+common_accessories+
+            common_merle+common_accessories_merle+
+            male+male_accessories+
+            male_merle+male_accessories_merle+
+            female+female_accessories+
+            female_merle+female_accessories_merle+
+            Gestures)){
+        llSetText("Click me to unpack\n"+llGetObjectName(), <0.0, 1.0, 0.0>, 1.0);
+            
+        }
+    }
+    
+    listen(integer chan, string n, key id, string message){
+        if(llGetOwnerKey(id)==owner){ // many many checks on that :D
+            if(message=="MALE"){
+                llOwnerSay("Giving you 2 folders. Please accept all."); 
+                llGiveInventoryList(owner, type+" male "+color, common+male);
+                llGiveInventoryList(owner, type+" male "+color+"-accessories", common_accessories+male_accessories+Gestures);   
+            }else if(message=="2nd MALE"){
+                llOwnerSay("Giving you 2 folders. Please accept all."); 
+                llGiveInventoryList(owner, type+" male 2nd "+color, common_merle+male_merle);
+                llGiveInventoryList(owner, type+" male 2nd "+color+"-accessories", common_accessories_merle+male_accessories_merle+Gestures);   
+            }else if(message=="FEMALE"){
+                llOwnerSay("Giving you 2 folders. Please accept all."); 
+                llGiveInventoryList(owner, type+" female "+color, common+female);
+                llGiveInventoryList(owner, type+" female "+color+"-accessories", common_accessories+female_accessories+Gestures);
+            }else if(message=="2nd FEMALE"){
+                llOwnerSay("Giving you 2 folders. Please accept all."); 
+                llGiveInventoryList(owner, type+" female 2nd "+color, common_merle+female_merle);
+                llGiveInventoryList(owner, type+" female 2nd "+color+"-accessories", common_accessories_merle+female_accessories_merle+Gestures);
+            
+            }else if(message=="--"){
+                list l=["._.", "o.o", ":D", ";'(", ":3", "ô.ô", "D:", "^.^", ":S"];
+                llOwnerSay(llList2String(l, (integer)llFrand(llGetListLength(l)))  );                
+            }
+        }
+    }
+    
+    changed(integer change){
+        if(change&CHANGED_OWNER) llResetScript();
+        if(change&CHANGED_INVENTORY) llSetTimerEvent(5.0);
+    }
+    
+    touch_start(integer total_number){
+        if(llDetectedKey(0)==owner){
+                llDialog(owner, "Do you want a male or a female avatar?", ["MALE","--","FEMALE", "2nd MALE", "--", "2nd FEMALE"], CHANNEL);
+        }
+    }
+    
+    on_rez(integer param){
+        llResetScript();
+    }
+    
+    timer(){
+        llResetScript();
+    }
+}
