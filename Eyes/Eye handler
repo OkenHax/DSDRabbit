@@ -1,0 +1,394 @@
+//========== Commons
+integer CHANNEL;
+integer giveDebug;
+integer giveFeedback;
+integer listenHandle;
+list IDs;
+key owner;
+
+//========== Notecard
+string NOTECARD="settings";
+key kQuery;
+integer current_notecard;
+integer iLine;
+
+
+list textures;
+//====================================================================================================
+
+integer feedbackEnabled=TRUE;
+integer isDebugging=TRUE;
+
+list irisTextures;
+string currentIrisTexture;
+vector constrainstMin;
+vector constrainstMax;
+float currentIrisDilation;
+float currentIrisGlow;
+list currentIrisColors=[ZERO_VECTOR, ZERO_VECTOR, ZERO_VECTOR];
+
+integer currentFullBright;
+
+list shapes;
+string currentShape;
+//===========================================================================================================================
+//===========================================================================================================================
+
+showFreeMemory(){
+    integer freemem = llGetFreeMemory();
+    if(llToLower( "Ü" ) == "Ü"){
+        integer memory = (integer)((float)freemem * 100.0 / 16384.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). LSO" );
+    }else{
+        integer memory = (integer)((float)freemem * 100.0 / 65536.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). Mono" );
+    }
+}
+
+integer getChannel(string _chan){
+    if(_chan=="dynamic"){
+        return -8388608-(integer)("0x"+llList2String(llParseString2List(llGetOwner(), ["-"], []), 2));
+    }else return (integer)_chan;
+}
+
+debug(string s){
+    if(giveDebug) llOwnerSay(s);
+}
+feedback(string s){
+    if(giveFeedback!=0) llOwnerSay(s);
+}
+
+
+processCommand(string cmd, string param){ 
+    list cmds=llParseString2List(llToLower(cmd), [";"], []);
+    list params=llParseString2List(param, [";"], []);
+    cmd=llList2String(cmds, 0);
+    param=llList2String(params, 0);
+    if(cmd=="channel"){
+        CHANNEL=getChannel(param);
+        if(listenHandle!=-1) llListenRemove(listenHandle);
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+    }else if(cmd=="reset"){
+        llResetScript();
+    }else if(cmd=="id"){
+        IDs=llParseString2List(param, [","], []);
+    }else if(cmd=="dump"){
+        llSay(CHANNEL, "hud:load:"+dumpSettings());
+    }else if(cmd=="feedback"){
+        if(param=="on") giveFeedback++; else giveFeedback--;
+    }else if(cmd=="debug"){
+        giveDebug=(param=="on");
+    }else if(cmd=="prim"){
+        primCtl(llList2String(cmds, 1), params);        
+    }else if(cmd=="iris"){
+        irisCtl(llList2String(cmds, 1), params);       
+    }else if(cmd=="shape"){
+        shapeCtl(llList2String(cmds, 1), params);
+    }
+}
+//===========================================================================================================================
+primCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer face=-1;
+    list tmp=llParseString2List(name, ["."], []);
+    if(llGetListLength(tmp)>1){
+        name=llList2String(tmp, 0);
+        face=llList2Integer(tmp, 1);
+    }
+
+    integer i=llGetNumberOfPrims();
+    integer len=llStringLength(name);
+
+    if(cmd=="alpha"){
+        float alpha=llList2Float(params, 1);
+        while(--i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkAlpha(i, alpha, face);
+            }
+        }
+    }else if(cmd=="color"){
+        vector color=llList2Vector(params, 1);
+        while(--i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkColor(i, color, face);
+            }
+        }
+    }else if(cmd=="texture"){
+        integer index=llListFindList(textures, [llList2String(params, 1)]);
+        list tmp;
+        if(index!=-1){
+            tmp=[(key)llList2String(textures, index+1), //texture
+                 (vector)llList2String(textures, index+2),//repeat
+                 (vector)llList2String(textures, index+3),//offset
+                 llList2Float(textures, index+4)]; //rot
+            while(i>=0){
+                if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                    llSetLinkPrimitiveParamsFast(i, [PRIM_TEXTURE, face]+tmp);
+                }
+                --i;
+            }
+        }else{        
+            key uuid=llList2String(params, 1);
+            while(i>=0){
+                if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                    llSetLinkTexture(i, uuid, face);
+                }
+                --i;
+            }
+        }
+    }else if(cmd=="glow"){
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, [PRIM_GLOW, llList2Float(params, 1)]);
+            }
+            --i;
+        }                
+    }else if(cmd=="raw"){
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, llList2List(params, 1, -1));
+            }
+            --i;
+        }        
+    }
+}
+//===========================================================================================================================
+textureCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(textures, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(textures);
+        }
+        textures=llListReplaceList(textures, [name]+llList2List(params, 1, 4), index, index+4); 
+    }
+}
+//===========================================================================================================================
+//Dump
+string dumpSettings(){    
+    return 
+    llDumpList2String(IDs, ",")+";"+
+    (string)currentIrisDilation+";"+
+    (string)currentIrisGlow+";"+
+    (string)currentFullBright+";"+
+    (string)(llListFindList(irisTextures, [currentIrisTexture])/4)+";"+
+    (string)(llListFindList(shapes, [currentShape])/3)+";"+
+    llDumpList2String(currentIrisColors, ";");
+}
+//===========================================================================================================================
+shapeCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(shapes, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(shapes);
+        }
+        shapes=llListReplaceList(shapes, llList2List(params, 0, 2), index, index+2);
+    }else if(cmd=="set"){
+        if(index!=-1){
+            integer oldIndex=llListFindList(shapes, [currentShape]);
+            currentShape=name;
+            
+            string currentName=llList2String(shapes, oldIndex+1);
+            string newName=llList2String(shapes, index+1);
+            integer i=llGetNumberOfPrims();
+            while(i>=0){
+                string linkName=llGetLinkName(i);
+                if(oldIndex!=-1){
+                    if(linkName==currentName){//Remove Old
+                        llSetLinkPrimitiveParamsFast(i, [PRIM_SIZE, <0.02, 0.02, 0.02>, PRIM_GLOW, ALL_SIDES, 0.0]);
+                        llSetLinkTexture(i,TEXTURE_BLANK,ALL_SIDES);
+                    }
+                }
+                if(linkName==newName){//add new
+                    vector v=(vector)llList2String(shapes, index+2);
+                    vector s=llGetScale();
+                    llSetLinkPrimitiveParamsFast(i, [PRIM_SIZE, <v.x*s.x, v.y*s.y, v.z*s.z>, PRIM_GLOW, ALL_SIDES, currentIrisGlow]);
+                }
+                --i;    
+            }
+            //irisCtl("texture", [currentIrisTexture]);
+            doSetPupilDilation(currentIrisDilation);
+        }    
+    }    
+}
+//===========================================================================================================================
+irisCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(irisTextures, [name]);
+    
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(irisTextures);
+        }
+        irisTextures=llListReplaceList(irisTextures, llList2List(params, 0, 3), index, index+2);
+    }else if(cmd=="dilation"){
+        if(name=="auto"){
+            llSetTimerEvent(60.0); 
+            updateSunDilation();
+            currentIrisDilation=-1;
+        }else{
+            llSetTimerEvent(0.0);
+            currentIrisDilation=llList2Float(params, 0);
+            doSetPupilDilation(currentIrisDilation);
+        }
+    }else if(cmd=="constraints"){
+        constrainstMin=(vector)llList2String(params, 0);
+        constrainstMax=(vector)llList2String(params, 1);
+    }else if(cmd=="glow"){
+        currentIrisGlow=llList2Float(params, 0);
+        integer shapeIndex=llListFindList(shapes, [currentShape]);
+        string currentName=llList2String(shapes, shapeIndex+1);
+        
+        integer i=llGetNumberOfPrims();
+        while(i>=0){
+            if(llGetLinkName(i)==currentName){//Only the current
+                llSetLinkPrimitiveParamsFast(i,[PRIM_GLOW, ALL_SIDES, currentIrisGlow]);
+            }
+            --i;
+        }
+    }else if(cmd=="bright"){
+        currentFullBright=llList2String(params, 0)=="on";
+        integer shapeIndex=llListFindList(shapes, [currentShape]);
+        string currentName=llList2String(shapes, shapeIndex+1);
+        
+        integer i=llGetNumberOfPrims();
+        while(i>=0){
+            if(llListFindList(shapes, [llGetLinkName(i)])!=-1){//all shapes
+                llSetLinkPrimitiveParamsFast(i,[PRIM_FULLBRIGHT, ALL_SIDES, currentFullBright]);
+            }
+            --i;
+        }
+        
+    }else if(cmd=="color"){
+        integer shapeIndex=llListFindList(shapes, [currentShape]);
+        string currentName=llList2String(shapes, shapeIndex+1);
+        index=(integer)name;
+        
+        currentIrisColors=llListReplaceList(currentIrisColors, [(vector)llList2String(params, 1)], index, index);
+        
+        integer i=llGetNumberOfPrims();
+        while(i>=0){
+            if(llListFindList(shapes, [llGetLinkName(i)])!=-1){//all shapes
+                llSetLinkColor(i,(vector)llList2String(params, 1),(integer)name);
+            }
+            --i;
+        }
+    }else if((cmd=="texture")||(cmd=="set")){
+        if(index!=-1){
+            currentIrisTexture=name;
+            integer shapeIndex=llListFindList(shapes, [currentShape]);
+            string currentName=llList2String(shapes, shapeIndex+1);
+            
+            integer i=llGetNumberOfPrims();
+            while(i>=0){
+                if(llGetLinkName(i)==currentName){//only the current
+                    llSetLinkTexture(i,llList2Key(irisTextures, index+1),0);
+                    llSetLinkTexture(i,llList2Key(irisTextures, index+2),1);
+                    llSetLinkTexture(i,llList2Key(irisTextures, index+3),2);
+                }
+                --i;
+            }    
+        }
+    }
+}
+//===========================================================================================================================
+doSetPupilDilation(float _dilation){
+        if(_dilation<0.0) _dilation=0.0;
+        if(_dilation>1.0) _dilation=1.0;
+        
+        vector v=(((constrainstMax-constrainstMin)*_dilation))+constrainstMin;
+        
+        integer index=llListFindList(irisTextures, [currentIrisTexture]);  
+        integer shapeIndex=llListFindList(shapes, [currentShape]);
+        string currentName=llList2String(shapes, shapeIndex+1);
+            
+        integer i=llGetNumberOfPrims();
+        while(i>=0){
+                if(llGetLinkName(i)==currentName){//Remove Old
+                    llSetLinkPrimitiveParamsFast(i,[PRIM_TEXTURE, 0, llList2Key(irisTextures, index+1), v, <0.0,0.5,0.0>, 0.0]);
+                    llSetLinkPrimitiveParamsFast(i,[PRIM_TEXTURE, 1, llList2Key(irisTextures, index+2), v, <0.0,0.5,0.0>, 0.0]);
+                    llSetLinkPrimitiveParamsFast(i,[PRIM_TEXTURE, 2, llList2Key(irisTextures, index+3), v, <0.0,0.5,0.0>, 0.0]);
+                }
+            --i;
+        }
+       /* llSetLinkPrimitiveParamsFast(getLink("color1"),[PRIM_TEXTURE, ALL_SIDES, llList2Key(irisTextures, currentIris+1) , <llList2Float(irisTextures, currentIris+5), _dilation, 0.0>, <0.0, 0.5, 0.0>, 0.0]);
+        llSetLinkPrimitiveParamsFast(getLink("color2"),[PRIM_TEXTURE, ALL_SIDES, llList2Key(irisTextures, currentIris+2), <llList2Float(irisTextures, currentIris+5), _dilation, 0.0>, <0.0, 0.5, 0.0>, 0.0]);
+        llSetLinkPrimitiveParamsFast(getLink("highlight1"),[PRIM_TEXTURE, ALL_SIDES, llList2Key(irisTextures, currentIris+3), <llList2Float(irisTextures, currentIris+5), _dilation, 0.0>, <0.0, 0.5, 0.0>, 0.0]);*/
+
+}
+
+//====================================================================================================
+updateSunDilation(){
+    vector s=llGetSunDirection();
+    s.z=(s.z+1)/2.0;
+    s.z=(1.0-s.z)*100.0;
+    doSetPupilDilation(s.z);    
+}
+//====================================================================================================
+//====================================================================================================
+default
+{
+    state_entry(){
+        owner=llGetOwner();
+        kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+    }
+
+    changed(integer change){
+        if(change & CHANGED_OWNER) llResetScript();
+        if(change & CHANGED_INVENTORY) llResetScript(); 
+    }
+
+    dataserver(key query_id, string data){
+        if(query_id == kQuery){
+            if(data == EOF){
+                ++current_notecard;
+                string note=llGetScriptName()+"_"+NOTECARD+(string)current_notecard;
+                if(llGetInventoryType(note)!=INVENTORY_NONE){
+                    kQuery = llGetNotecardLine(note, iLine=0);
+                }else{
+                    state run;
+                }
+            }else{
+                ++iLine;
+                if(current_notecard!=0){
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD+(string)current_notecard, iLine);
+                }else{
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+                }
+
+                data=llStringTrim(data, STRING_TRIM);
+                if(llGetSubString(data, 0,0)!="#"){
+                    list l=llParseString2List(data, [":"], []);
+                    processCommand(llList2String(l, 0), llList2String(l, 1));
+                }
+            }
+        }
+    }
+}
+//====================================================================================================
+state run{
+    state_entry(){
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+        showFreeMemory();
+    }
+
+    changed(integer change){
+        if(change&CHANGED_OWNER)llResetScript(); 
+        if(change&CHANGED_INVENTORY)llResetScript();
+        if(change&CHANGED_LINK)llResetScript();
+    }
+
+    listen(integer channel, string name, key _id, string message){
+        if(llGetOwnerKey(_id)==owner){
+            list temp=llParseString2List(llStringTrim(message, STRING_TRIM), [":"], []);
+            if(llListFindList(IDs, [llList2String(temp, 0)])!=-1){
+                processCommand(llList2String(temp, 1), llList2String(temp, 2));
+            }
+        }
+    }
+
+    timer(){
+        updateSunDilation();
+    }
+}
