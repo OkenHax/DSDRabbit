@@ -1,0 +1,493 @@
+//========== Commons
+integer CHANNEL;
+integer giveDebug;
+integer giveFeedback;
+integer listenHandle;
+list IDs;
+key owner;
+
+//========== Notecard
+string NOTECARD="settings";
+key kQuery;
+integer current_notecard;
+integer iLine;
+//======================================================
+float currentAngle=200.0;
+float offsetAngle;
+
+list flex;
+float scaleWidth=0.0;
+float scaleHeight=0.0;
+
+
+//======================================================
+list shapes;
+//======================================================
+list flexs;
+list currentFlex;
+//======================================================
+list textures;
+//======================================================
+integer currentWagStyle=1;
+    integer WAG_NORMAL=0;
+    integer WAG_WAG   =1;
+    integer WAG_RANDOM=2;
+list wags;
+float currentWagSpeed;
+//======================================================
+
+integer switch=0;
+string currentSpeed;
+list speeds=["none", "slow", "middle", "fast"];
+//======================================================
+float clickTime;
+integer CHANNEL_DIALOGS; //randomized
+integer channelDialogsHandler;
+integer emoteEnabled;
+list emotes;
+//===========================================================================================================================
+//===========================================================================================================================
+
+showFreeMemory(){
+    integer freemem = llGetFreeMemory(); 
+    if(llToLower( "Ü" ) == "Ü"){
+        integer memory = (integer)((float)freemem * 100.0 / 16384.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). LSO" );
+    }else{
+        integer memory = (integer)((float)freemem * 100.0 / 65536.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). Mono" );
+    }
+}
+
+integer getChannel(string _chan){
+    if(_chan=="dynamic"){
+        return -8388608-(integer)("0x"+llList2String(llParseString2List(llGetOwner(), ["-"], []), 2));
+    }else return (integer)_chan;
+}
+
+debug(string s){ 
+    if(giveDebug) llOwnerSay(s);
+}
+feedback(string s){
+    if(giveFeedback!=0) llOwnerSay(s);
+}
+
+
+processCommand(string cmd, string param){ 
+    list cmds=llParseString2List(llToLower(cmd), [";"], []);
+    list params=llParseString2List(param, [";"], []);
+    cmd=llList2String(cmds, 0);
+    param=llList2String(params, 0);
+    if(cmd=="channel"){
+        CHANNEL=getChannel(param);
+        if(listenHandle!=-1) llListenRemove(listenHandle);
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+    }else if(cmd=="reset"){
+        llResetScript();
+    }else if(cmd=="id"){
+        IDs=llParseString2List(param, [","], []);
+    }else if(cmd=="feedback"){
+        if(param=="on") giveFeedback++; else giveFeedback--;
+    }else if(cmd=="debug"){
+        giveDebug=(param=="on");
+    }else if(cmd=="prim"){
+        primCtl(llList2String(cmds, 1), params);       
+    }else if(cmd=="texture"){
+        textureCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="flex"){
+        flexCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="shape"){
+        shapeCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="wag"){
+        wagCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="emote"){
+        emoteCtl(llList2String(cmds, 1), params);  
+    }
+}
+//===========================================================================================================================
+primCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer face=-1;
+    list tmp=llParseString2List(name, ["."], []);
+    if(llGetListLength(tmp)>1){
+        name=llList2String(tmp, 0);
+        face=llList2Integer(tmp, 1);
+    }
+
+    integer i=llGetNumberOfPrims();
+    integer len=llStringLength(name);
+
+    if(cmd=="alpha"){
+        float alpha=llList2Float(params, 1);
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkAlpha(i, alpha, face);
+            }
+            --i;
+        }
+    }else if(cmd=="color"){
+        vector color=llList2Vector(params, 1);
+        while(--i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkColor(i, color, face);
+            }
+        }
+    }else if(cmd=="texture"){
+        integer index=llListFindList(textures, [llList2String(params, 1)]);
+        list tmp;
+        if(index!=-1){
+            tmp=[(key)llList2String(textures, index+1), //texture
+                 (vector)llList2String(textures, index+2),//repeat
+                 (vector)llList2String(textures, index+3),//offset
+                 llList2Float(textures, index+4)]; //rot
+            while(i>=0){
+                if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                    llSetLinkPrimitiveParamsFast(i, [PRIM_TEXTURE, face]+tmp);
+                }
+                --i;
+            }
+        }else{        
+            key uuid=llList2String(params, 1);
+            while(i>=0){
+                if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                    llSetLinkTexture(i, uuid, face);
+                }
+                --i;
+            }
+        }
+    }else if(cmd=="raw"){
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, llList2List(params, 1, -1));
+            }
+            --i;
+        }        
+    }
+}
+//===========================================================================================================================
+textureCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(textures, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(textures);
+        }
+        textures=llListReplaceList(textures, [name]+llList2List(params, 1, 4), index, index+4); 
+    }
+}
+
+//==========================================================================================================
+flexCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(flexs, [name]);
+    if(cmd=="add"){
+        if(index=-1){
+            index=llGetListLength(flexs);
+        }
+        flexs=llListReplaceList(flexs, [
+            name, 
+            llList2Integer(params, 1),
+            llList2Float(params, 2),
+            llList2Float(params, 3),
+            llList2Float(params, 4),
+            llList2Float(params, 5),
+            llList2Vector(params, 6)], index, index+6);
+    }else if(cmd=="set"){
+        if(index!=-1){
+            currentFlex=llList2List(flexs, index+1, index+6);
+            update();
+        }
+    }
+}
+
+//==========================================================================================================
+shapeCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(shapes, [name]);
+    if(cmd=="add"){
+        if(index=-1){
+            index=llGetListLength(shapes);
+        }
+        shapes=llListReplaceList(shapes, [
+            name, 
+            (vector)llList2String(params, 1),
+            (vector)llList2String(params, 2),
+            (vector)llList2String(params, 3),
+            (vector)llList2String(params, 4)], index, index+4);
+    }else if(cmd=="fluff"){
+        scaleWidth=(float)name;
+        update();
+    }else if(cmd=="length"){
+        scaleHeight=(float)name; 
+        update();
+    }else if(cmd=="angle"){ 
+        offsetAngle=(100-((float)name*100.0))-80.0;
+        
+        update();
+    }
+}
+//==========================================================================================================
+wagCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(wags, [name]);
+    if(cmd=="add"){
+        if(index=-1){
+            index=llGetListLength(wags);
+        }
+        flexs=llListReplaceList(wags, [
+            name, 
+            (vector)llList2String(params, 1),
+            (vector)llList2String(params, 2),
+            (vector)llList2String(params, 3),
+            (vector)llList2String(params, 4)], index, index+4);
+    }else if(cmd=="set"){ 
+        if(name=="normal"){ currentWagStyle=WAG_NORMAL;
+        }else if(name=="wag"){ currentWagStyle=WAG_WAG;
+        }else if(name=="random"){ currentWagStyle=WAG_RANDOM;
+        }else{ feedback("Unknown twitch style: \""+name+"\""); return;}
+        feedback("setting tail's twitch style: "+name);
+    }else if(cmd=="speed"){ 
+        if(name=="none")         currentWagSpeed=0.0;
+        else if(name=="slow")    currentWagSpeed=0.7;
+        else if(name=="middle")  currentWagSpeed=0.4;   
+        else if(name=="fast")    currentWagSpeed=0.2;
+        
+        llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_ROT_LOCAL, llEuler2Rot(<0, 0, 0> * DEG_TO_RAD )]);
+        llSetTimerEvent(currentWagSpeed);
+    }
+}
+//==========================================================================================================
+moveHorizontal(integer randomized, float angle){
+    rotation rot;
+    if(randomized) rot=llEuler2Rot(<0, 0, llFrand(angle)> * DEG_TO_RAD );    // Create a rotation constant 
+        else  rot=llEuler2Rot(<0, 0, angle> * DEG_TO_RAD );    // Create a rotation constant   
+    llSetLinkPrimitiveParamsFast(LINK_THIS, [PRIM_ROT_LOCAL, rot]);
+}
+//=============================================================================
+rotation getFlexRot(float angle){
+        rotation x_angle = llEuler2Rot( <0.0, angle, 0.0>*DEG_TO_RAD );
+        rotation new_rot = x_angle*llEuler2Rot(<0.0, 90.0, 180.0>*DEG_TO_RAD);
+
+        return new_rot/llGetLocalRot(); 
+}
+    
+update(){
+    integer i=0;
+    
+    while(i<llGetListLength(shapes)){
+        string name=llList2String(shapes, i);     
+        integer prim=llGetNumberOfPrims();
+        while(prim>=0){
+            if(llGetLinkName(prim)==name){
+                vector minSize=llList2Vector(shapes, i+1);
+                vector minTaper=llList2Vector(shapes, i+2);
+                vector maxSize=llList2Vector(shapes, i+3);
+                vector maxTaper=llList2Vector(shapes, i+4);
+                
+                vector size=minSize+<(maxSize.x-minSize.x)*scaleWidth, (maxSize.y-minSize.y)*scaleWidth, (maxSize.z-minSize.z)*scaleHeight>;
+                vector taper=minTaper+(<maxTaper.x-minTaper.x, maxTaper.y-minTaper.y, 0.0>*scaleWidth);                        
+                
+                float radAngle=(currentAngle+offsetAngle)*DEG_TO_RAD;
+                float hyp=size.z/2;
+                float a=llCos(radAngle)*hyp;
+                float b=llSin(radAngle)*hyp;        
+                
+                
+                llSetLinkPrimitiveParamsFast(prim, [
+                    PRIM_TYPE, PRIM_TYPE_CYLINDER, PRIM_HOLE_DEFAULT, <0.0,1.0,0.0>, 0.0, <0.0,0.0,0.0>, <2.0-(1.0+taper.x), 2.0-(1.0+taper.y), 0.0>, <0.0,0.0,0.0>
+                   ,PRIM_SIZE, <size.x, size.y, size.z> 
+                   ,PRIM_POSITION, <a, 0.0, b>
+                   ,PRIM_ROTATION, getFlexRot(currentAngle+offsetAngle)
+                   ,PRIM_FLEXIBLE, 1]+currentFlex);     
+            }
+            --prim;
+        }
+        i+=5;
+    }
+}
+//=============================================================================
+            
+emoteCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(emotes, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(emotes);
+        }
+        string ownerName=llKey2Name(owner);
+        string line=strReplace(llList2String(params, 1), "%O%", ownerName);        
+        line=strReplace(line, "%o%", llList2String(llParseString2List(ownerName, [" "], []), 0));
+        emotes=llListReplaceList(emotes, [name, line], index, index+1);
+    }else if(cmd=="enable"){
+        emoteEnabled=(name=="on");
+        if(emoteEnabled){
+            channelDialogsHandler=llListen(CHANNEL_DIALOGS, "", NULL_KEY, "");
+        }else{
+            llListenRemove(channelDialogsHandler);
+        }
+        
+    }
+}
+
+string strReplace(string str, string search, string replace) {
+    return llDumpList2String(llParseStringKeepNulls((str = "") + str, [search], []), replace);
+}
+
+showDialog(key id, integer page){
+    list keywords=llList2ListStrided(emotes,0,-1,2);
+    
+    integer length=llGetListLength(keywords);
+    if(length>12){
+        integer min=(page*10);
+        integer max=(page*10)+9;
+        if(max>(length-1)) max=length-1;
+        
+        list l;
+        if(page==0){
+            l=llList2List(keywords, min, max)+[ "page "+((string)(page+1))];
+        }else if(page==(length/10)){
+            l=["page "+((string)(page-1))]+llList2List(keywords, min, max);
+        }else{
+            l=["page "+((string)(page-1))]+llList2List(keywords, min, max)+[ "page "+((string)(page+1))];
+        }
+        llDialog(id, llKey2Name(owner)+"'s gear", l, CHANNEL_DIALOGS);
+    }else{
+        llDialog(id, llKey2Name(owner)+"'s gear", keywords, CHANNEL_DIALOGS);
+    }
+}
+
+dialogCommand(key id, string cmd){
+    list l=llParseString2List(cmd, [" "], []);
+    if(llList2String(l, 0)=="page"){
+        showDialog(id, llList2Integer(l, 1));
+    }else{
+        integer index=llListFindList(emotes, [cmd]);
+        if(index!=-1){
+            string line=llList2String(emotes, index+1);
+            string name=llKey2Name(id);
+            line=strReplace(line, "%E%", name);
+            line=strReplace(line, "%e%",  llList2String(llParseString2List(name, [" "], []), 0));
+            line=strReplace(line, "%do%",  llGetDisplayName(owner));
+            line=strReplace(line, "%de%",  llGetDisplayName(id));
+            
+            string oldName=llGetObjectName();
+            llSetObjectName("");
+            llSay(0, "/me "+line);
+            llSetObjectName(oldName);
+        }
+    }
+}
+//======================================================================================
+//======================================================================================
+default 
+{
+    state_entry(){
+        owner=llGetOwner();
+        kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+    }
+
+    changed(integer change){ 
+        if(change & CHANGED_OWNER) llResetScript();
+        if(change & CHANGED_INVENTORY) llResetScript(); 
+    }
+
+    dataserver(key query_id, string data){
+        if(query_id == kQuery){
+            if(data == EOF){
+                ++current_notecard;
+                string note=llGetScriptName()+"_"+NOTECARD+(string)current_notecard;
+                if(llGetInventoryType(note)!=INVENTORY_NONE){
+                    kQuery = llGetNotecardLine(note, iLine=0);
+                }else{
+                    state run;
+                }
+            }else{
+                ++iLine;
+                if(current_notecard!=0){
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD+(string)current_notecard, iLine);
+                }else{
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+                }
+
+                data=llStringTrim(data, STRING_TRIM);
+                if(llGetSubString(data, 0,0)!="#"){
+                    list l=llParseString2List(data, [":"], []);
+                    processCommand(llList2String(l, 0), llList2String(l, 1));
+                }
+            }
+        }
+    }
+}
+
+//======================================================================================
+
+state run{
+    state_entry(){ 
+        CHANNEL_DIALOGS=-20000-(integer)llFrand(10000);
+        if(emoteEnabled) channelDialogsHandler=llListen(CHANNEL_DIALOGS, "", NULL_KEY, "");
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+        llSetTimerEvent(currentWagSpeed);
+        showFreeMemory();
+    }
+
+    changed(integer change){
+        if(change&CHANGED_OWNER)llResetScript();
+        if(change&CHANGED_INVENTORY)llResetScript();
+        if(change&CHANGED_LINK)llResetScript();
+    }
+    
+    touch_start(integer num){
+        if(emoteEnabled){
+            clickTime=llGetTime(); 
+        }
+    }
+    
+    touch_end(integer total_number){
+        if(emoteEnabled){
+            float t=llGetTime()-clickTime;
+            if(t<=0.2){        
+                showDialog(llDetectedKey(0), 0);
+            }       
+        }
+    }
+    
+    listen(integer channel, string name, key _id, string message){
+        if(channel==CHANNEL_DIALOGS){
+            dialogCommand(_id, message);
+        }else{
+            if(llGetOwnerKey(_id)==owner){
+                list temp=llParseString2List(llStringTrim(message, STRING_TRIM), [":"], []);
+                if(llListFindList(IDs, [llList2String(temp, 0)])!=-1){
+                    processCommand(llList2String(temp, 1), llList2String(temp, 2));
+                }
+            }
+        }
+    }    
+
+    timer(){        
+        if(currentWagStyle==WAG_NORMAL){
+            if(switch<=4)  moveHorizontal(TRUE, -25.0);
+                else  moveHorizontal(TRUE, 25.0);
+            switch=(switch+1)%8;            
+        }else if(currentWagStyle==WAG_WAG){
+                if(llFrand(5.0)<1.0){
+                    moveHorizontal(FALSE, 25.0); 
+                    moveHorizontal(FALSE, -25.0);
+                    moveHorizontal(FALSE, 25.0); 
+                    moveHorizontal(FALSE, -25.0);
+                }else{
+                    switch=(switch+1)&3;
+                    if(switch==0) moveHorizontal(FALSE, -12.5);
+                    else if(switch==1) moveHorizontal(FALSE, -25.0);
+                    else if(switch==2) moveHorizontal(FALSE, 12.5);
+                    else if(switch==3) moveHorizontal(FALSE, 25.0);
+                }
+        }else if(currentWagStyle==WAG_RANDOM){
+            if(llFrand(3.0)<=1.0){
+                if(llFrand(1.0)<0.5) moveHorizontal(TRUE, -25.0);
+                    else moveHorizontal(TRUE, 25.0);
+            }
+        
+        }
+    }
+}
