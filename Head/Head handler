@@ -1,0 +1,476 @@
+//Commons
+integer CHANNEL;
+integer giveDebug;
+integer giveFeedback;
+integer listenHandle;
+list IDs;
+key owner;
+//========== Notecard
+string NOTECARD="settings";
+key kQuery;
+integer current_notecard;
+integer iLine;
+//===========================================================================================================================
+list bakedExpression; //[name; times;  integers]
+integer currentExpression=-1;
+
+vector scullDefaultScale=<10.41174, 11.57723, 11.01398>;
+list expressions=[
+];
+
+integer blinkEnabled=1;
+list animations;//[time; animation]
+//===========================================================================================================================
+list textures;
+list shines;
+float shineAlpha;
+integer currentShine;
+
+vector currentWhiskersColor;
+
+//===========================================================================================================================
+//===========================================================================================================================
+
+
+showFreeMemory(){
+    integer freemem = llGetFreeMemory();
+    if(llToLower( "Ü" ) == "Ü"){
+        integer memory = (integer)((float)freemem * 100.0 / 16384.0);
+        debug(llGetScriptName()+" "+(string)memory + "% memory free ("+(string)freemem+" Byte). LSO" );
+    }else{
+        integer memory = (integer)((float)freemem * 100.0 / 65536.0);
+        debug(llGetScriptName()+" "+(string)memory + "% memory free ("+(string)freemem+" Byte). Mono" );
+    }
+}
+
+integer getChannel(string _chan){
+    if(_chan=="dynamic"){
+        return -8388608-(integer)("0x"+llList2String(llParseString2List(llGetOwner(), ["-"], []), 2));
+    }else return (integer)_chan;
+}
+
+debug(string s){
+    if(giveDebug) llOwnerSay(s);
+}
+feedback(string s){
+    if(giveFeedback!=0) llOwnerSay(s);
+}
+
+
+processCommand(string cmd, string param){
+    list cmds=llParseString2List(llToLower(cmd), [";"], []);
+    list params=llParseString2List(param, [";"], []);
+    cmd=llList2String(cmds, 0);
+    param=llList2String(params, 0);
+    if(cmd=="channel"){
+        CHANNEL=getChannel(param);
+        if(listenHandle!=-1) llListenRemove(listenHandle);
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, ""); 
+    }else if(cmd=="reset"){
+        llResetScript();
+    }else if(cmd=="id"){
+        IDs=llParseString2List(param, [","], []);
+    }else if(cmd=="feedback"){
+        if(param=="on") giveFeedback++; else giveFeedback--;
+    }else if(cmd=="dump"){
+        llSay(CHANNEL, "hud:load:"+dumpSettings());
+    }else if(cmd=="debug"){
+        giveDebug=(param=="on");
+    }else if(cmd=="animation"){
+        animationCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="prim"){
+        primCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="whiskers"){
+        whiskersCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="expression"){
+        expressionCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="shine"){
+        shineCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="state"){
+        //stateCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="texture"){
+        textureCtl(llList2String(cmds, 1), params);
+    }
+}
+
+//===========================================================================================================================
+textureCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    if(cmd=="add"){
+        integer index=llListFindList(textures, [name]);
+        if(index==-1){
+            index=llGetListLength(textures);
+        }
+        textures=llListReplaceList(textures, llList2List(params, 0, -1), index, index+4);        
+    }else if(cmd=="set"){
+        integer index=llListFindList(textures, [llList2String(params, 1)]);
+        if(index!=-1){
+            primCtl("texture", [name]+llList2List(textures, index+1, index+4));
+        }        
+    }
+}
+
+//===========================================================================================================================
+whiskersCtl(string cmd, list params){
+    if(cmd=="color"){
+        currentWhiskersColor=(vector)llList2String(params, 0);
+        primCtl("color", ["whiskers", currentWhiskersColor]);  
+    }else if(cmd=="alpha"){
+    }
+}
+
+shineCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    if(cmd=="add"){
+        integer index=llListFindList(shines, [name]);
+        if(index==-1){
+            index=llGetListLength(shines);
+        }
+        shines=llListReplaceList(shines, llList2List(params, 0, -1), index, index+4);        
+    }else if(cmd=="set"){
+        integer index=llListFindList(shines, [name]);
+        if(index!=-1){
+            currentShine=index;
+            primCtl("texture", ["highlight"]+llList2List(shines, index+1, index+4));
+        }
+    }else if(cmd=="alpha"){
+        shineAlpha=(float)name;
+        primCtl("alpha", ["highlight", shineAlpha]);  
+    }
+}
+
+//===========================================================================================================================
+
+primCtl(string cmd, list params){
+    
+    
+    string name=llList2String(params, 0);
+    integer face=-1;
+    list tmp=llParseString2List(name, ["."], []);
+    if(llGetListLength(tmp)>1){
+        name=llList2String(tmp, 0);
+        face=llList2Integer(tmp, 1);
+    }
+
+    integer i=llGetNumberOfPrims();
+    integer len=llStringLength(name);
+
+    if(cmd=="alpha"){
+        float alpha=llList2Float(params, 1);
+        while(--i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkAlpha(i, alpha, face);
+            }
+        }
+    }else if(cmd=="color"){
+        vector color=(vector)llList2String(params, 1);
+        while(--i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkColor(i, color, face);
+            }
+        }
+    }else if(cmd=="texture"){
+        integer index=llListFindList(textures, [llList2String(params, 1)]);
+        list tmp;
+        if(index!=-1){
+            tmp=[(key)llList2String(textures, index+1), //texture
+                 (vector)llList2String(textures, index+2),//repeat
+                 (vector)llList2String(textures, index+3),//offset
+                 llList2Float(textures, index+4)]; //rot
+        }else{        
+            tmp=[(key)llList2String(params, 1), //texture
+                 (vector)llList2String(params, 2),//repeat
+                 (vector)llList2String(params, 3),//offset
+                 llList2Float(params, 4)]; //rot
+        }
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, [PRIM_TEXTURE, face]+tmp);
+            }
+            --i;
+        }
+    }
+
+}
+
+//===========================================================================================================================
+//Dump
+string dumpSettings(){    
+    return llDumpList2String(IDs, ",")+";"+
+    (string)(currentExpression/3)+";"+
+    (string)blinkEnabled+";"+
+    (string)shineAlpha+";"+
+    (string)(currentShine/5)+";"+
+    (string)currentWhiskersColor;//+ (string)(currentShine);
+}
+
+//===========================================================================================================================
+string IDlist2Integer(list _IDs){
+    list result;
+    
+    integer i=0;
+    string oldName;
+    integer oldNum;
+    
+    while(i<llGetListLength(_IDs)){
+        list l=llParseString2List(llList2String(_IDs, i), ["."], []);
+        string currentName=llToLower(llList2String(l, 0));
+        integer currentNum;
+        if(currentName!=oldName){ //search prim
+            integer j=llGetNumberOfPrims();
+            while(j>0){
+                if(llToLower(llGetLinkName(j))==currentName){
+                    currentNum=j;
+                    j=0;
+                }
+                
+                --j;
+            }
+            
+        }else{
+            currentNum=oldNum;
+        }
+        oldName=currentName;
+        oldNum=currentNum;
+        result+=[( currentNum | (llList2Integer(l, 1)<<16) )];   
+        ++i; 
+    }
+    
+    return llDumpList2String(result, ",");
+}
+
+animate(list _anim, float _frameTime){
+    integer i=0;
+    
+    integer link=-1;
+    integer oldFace;
+    integer face;
+            
+    while(i<llGetListLength(_anim)){        
+        face=llList2Integer(_anim, i) >> 16;
+        if(link!=-1){
+            if(oldFace!=face){ 
+                llSetLinkAlpha(link, 0.0, oldFace); // Hide old
+            }
+        }
+        
+        link=llList2Integer(_anim, i) & 0xFFFF;
+            
+        llSetLinkAlpha(link, 1.0, face); //show new
+        oldFace=face;
+            
+        llSleep(_frameTime);
+        ++i;
+    }        
+}
+
+
+animationCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    if(cmd=="add"){
+        integer index=llListFindList(bakedExpression, [name]);
+        if(index==-1){
+            index=llGetListLength(bakedExpression);
+        }
+        string times=llList2String(params, 1);
+        string frames=llList2String(params, 2);
+        bakedExpression=llListReplaceList(bakedExpression, [name, times, IDlist2Integer(llParseString2List(frames, [","], []))], index, index+2);
+    }else if(cmd=="del"){
+        integer index=llListFindList(animations, [name]);
+        if(index!=-1){
+            bakedExpression=llDeleteSubList(animations, index, index+2);
+        }
+    }else if(cmd=="enable"){
+        cmd=llList2String(params, 1);        
+        if(cmd=="on"){
+            integer index=llListFindList(bakedExpression, [name]);
+            if(index!=-1){
+                feedback("start "+llList2String(params, 0)+" animation");
+                animations+=[0.0, index];
+                llSetTimerEvent(0.01);
+            }
+        }else{
+            integer index=llListFindList(bakedExpression, [name]);
+            if(index!=-1){
+                integer i=0;
+                while(llGetListLength(animations)>i){
+                    if(index==llList2Integer(animations, i+1)){
+                        animations=llDeleteSubList(animations, i, i+1);
+                    }else i+=2;
+                }
+            }
+                
+            if(animations==[]) llSetTimerEvent(0.0);
+        }
+    }
+}
+//===========================================================================================================================
+setExpression(string _expression){
+    integer index=llListFindList(bakedExpression, [_expression]);
+    if((index!=currentExpression) && (index!=-1)){
+        
+        
+        //show new skull
+        integer firstFrame=llList2Integer(llParseString2List(llList2String(bakedExpression, index+2), [","], []), 0);
+        integer newLink=firstFrame & 0xFFFF;  
+        vector currentScale=llGetScale();
+        llSetLinkPrimitiveParamsFast(newLink, [PRIM_SIZE, scullDefaultScale*currentScale.x]);
+        llSetLinkAlpha(newLink, 0.0, ALL_SIDES);//hide all
+        llSetLinkAlpha(newLink, 1.0, 0);// main skull
+        llSetLinkAlpha(newLink, 1.0, firstFrame>>16);//first frame
+        
+        llSleep(0.3);//due to scale interpolation....
+        
+        //remove old skull
+        if(currentExpression!=-1){ 
+            list frames=llParseString2List(llList2String(bakedExpression, (currentExpression+2)), [","], []);
+            integer currentLink=llList2Integer(frames, 0) & 0xFFFF;
+            if(newLink!=currentLink){     
+                llSetLinkPrimitiveParamsFast(currentLink, [PRIM_SIZE, <0.02,0.02,0.02>]);        
+                llSetLinkAlpha(currentLink, 1.0, ALL_SIDES);
+            }
+            integer i=0;
+            while(llGetListLength(animations)>i){
+                if(llList2Integer(animations, i+1)==currentExpression){
+                    animations=llDeleteSubList(animations, i, i+1);
+                }else i+=2;
+            }
+            
+        }
+        
+        currentExpression=index;
+        if(blinkEnabled) animations=[0.0, currentExpression]+animations;
+        
+        if(blinkEnabled) llSetTimerEvent(0.01);
+    }
+}
+
+expressionCtl(string cmd, list params){
+    if(cmd=="set"){
+        setExpression(llList2String(params, 0));
+    }else if(cmd=="blink"){
+        blinkEnabled=llList2String(params, 0)=="on";
+        
+        integer i=0;
+        while(llGetListLength(animations)>i){
+            if(llList2Integer(animations, i+1)==currentExpression){
+                animations=llDeleteSubList(animations, i, i+1);
+            }else i+=2;
+        }
+        if(blinkEnabled){
+            llSetTimerEvent(0.01);
+            animations=[0.0, currentExpression]+animations;
+        }else{
+            if(animations==[]) llSetTimerEvent(0.0);
+        }
+    }
+}
+
+//===========================================================================================================================
+//===========================================================================================================================
+
+default
+{
+    state_entry(){
+        owner=llGetOwner();
+        kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+    }
+
+    changed(integer change){
+        if(change & CHANGED_OWNER) llResetScript();
+        if(change & CHANGED_INVENTORY) llResetScript(); 
+    }
+    
+    dataserver(key query_id, string data){
+        if(query_id == kQuery){
+            if(data == EOF){
+                ++current_notecard;
+                string note=llGetScriptName()+"_"+NOTECARD+(string)current_notecard;
+                if(llGetInventoryType(note)!=INVENTORY_NONE){
+                    kQuery = llGetNotecardLine(note, iLine=0);
+                }else{
+                    state run;
+                }
+            }else{
+                ++iLine;
+                if(current_notecard!=0){
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD+(string)current_notecard, iLine);
+                }else{
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+                }
+
+                data=llStringTrim(data, STRING_TRIM);
+                if(llGetSubString(data, 0,0)!="#"){
+                    list l=llParseString2List(data, [":"], []);
+                    processCommand(llList2String(l, 0), llList2String(l, 1));
+                }
+            }
+        }
+    }
+}
+//===========================================================================================================================
+state run
+{
+    state_entry(){  
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, ""); 
+        setExpression("relaxed");
+        if(animations!=[])  llSetTimerEvent(0.01);      
+        showFreeMemory();          
+    }
+                
+    changed(integer change){   
+        if(change & CHANGED_OWNER) llResetScript();
+        if(change & CHANGED_INVENTORY) llResetScript();    
+        if(change & CHANGED_LINK)llResetScript();    
+    }
+
+    timer(){
+        float currentTime=llGetTime();
+        if(currentTime>86400.0){ // Need to reset the time to keep accuracy and avoid bugs
+            integer index=0;
+            while(llGetListLength(animations)>index){
+                animations=llListReplaceList(animations, [currentTime-llList2Float(animations, index)], index, index);
+                index+=2;
+            }            
+            llResetTime();
+            currentTime=0;
+        }
+        
+        
+        integer exp=llList2Integer(animations, 1);
+        animations=llDeleteSubList(animations, 0, 1);
+        
+        
+        list frames=llParseString2List(llList2String(bakedExpression, exp+2), [","], []);
+        list times=llParseString2List(llList2String(bakedExpression, exp+1), [","], []);
+        animate(frames, llList2Float(times, 2));
+        
+        
+        float rnd=llList2Float(times, 0)+llFrand(llList2Float(times, 1)-llList2Float(times, 0));
+        float nextTime=currentTime+rnd;
+        
+        integer index=0;
+        while((llGetListLength(animations)>index) && (llList2Float(animations, index)<nextTime)) index+=2;
+        
+        animations=llListInsertList(animations, [nextTime, exp], index);          
+        
+        if(animations!=[]){ //launch next anim
+            float time = llList2Float(animations, 0)-currentTime;
+            if(time<=0.01) time=0.01;
+            llSetTimerEvent(time);
+        }else{
+            llSetTimerEvent(0.0);
+        }        
+    }
+        
+
+    listen(integer channel, string name, key _id, string message){
+        if(llGetOwnerKey(_id)==owner){
+            list temp=llParseString2List(llStringTrim(message, STRING_TRIM), [":"], []);
+            if(llListFindList(IDs, [llList2String(temp, 0)])!=-1){
+                processCommand(llList2String(temp, 1), llList2String(temp, 2));
+            }
+        }
+    }
+        
+}
