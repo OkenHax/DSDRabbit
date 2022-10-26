@@ -1,0 +1,488 @@
+//========== Commons
+integer CHANNEL;
+integer giveDebug;
+integer giveFeedback;
+integer listenHandle;
+list IDs;
+key owner;
+
+//========== Notecard
+string NOTECARD="settings";
+key kQuery;
+integer current_notecard;
+integer iLine;
+
+//======================================================
+//States
+integer state_enabled; //bit_list
+integer state_on; //bit_list
+
+list state_settings;//[state_name, exp_name]
+integer state_current;
+
+//=========================================== 
+integer autoReset;
+//=========================================== 
+// Claws
+list claws; //[name, base_rot, offset_rot, color]
+float currentClawRotOffset;
+
+//=========================================== 
+// Textures
+list textures; //[name, uuid, scale, offset]
+
+//=========================================== 
+// Fingers
+list fingers; //[name, current, prim, lst_tex]
+//===========================================
+// Particles 
+list particles;
+string currentParticle;
+string particleColor;
+integer particlePrim;
+list particleSettings;
+integer particleEnabled;
+//===========================================================================================================================
+//===========================================================================================================================
+
+showFreeMemory(){
+    integer freemem = llGetFreeMemory();
+    if(llToLower( "Ü" ) == "Ü"){
+        integer memory = (integer)((float)freemem * 100.0 / 16384.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). LSO" );
+    }else{
+        integer memory = (integer)((float)freemem * 100.0 / 65536.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). Mono" );
+    }
+}
+
+integer getChannel(string _chan){
+    if(_chan=="dynamic"){
+        return -8388608-(integer)("0x"+llList2String(llParseString2List(llGetOwner(), ["-"], []), 2));
+    }else return (integer)_chan;
+}
+
+debug(string s){ 
+    if(giveDebug) llOwnerSay(s);
+}
+feedback(string s){
+    if(giveFeedback!=0) llOwnerSay(s);
+}
+
+
+processCommand(string cmd, string param){ 
+    list cmds=llParseString2List(llToLower(cmd), [";"], []);
+    list params=llParseString2List(param, [";"], []);
+    cmd=llList2String(cmds, 0);
+    param=llList2String(params, 0);
+    if(cmd=="channel"){
+        CHANNEL=getChannel(param);
+        if(listenHandle!=-1) llListenRemove(listenHandle);
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+    }else if(cmd=="reset"){
+        llResetScript();
+    }else if(cmd=="id"){
+        IDs=llParseString2List(param, [","], []);
+    }else if(cmd=="dump"){
+        llSay(CHANNEL, "hud:load:"+dumpSettings());
+    }else if(cmd=="feedback"){
+        if(param=="on") giveFeedback++; else giveFeedback--;
+    }else if(cmd=="debug"){
+        giveDebug=(param=="on");
+    }else if(cmd=="prim"){
+        primCtl(llList2String(cmds, 1), params);        
+    }else if(cmd=="state"){
+        stateCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="texture"){
+        textureCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="claw"){
+        clawCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="particle"){
+        particleCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="finger"){
+        fingerCtl(llList2String(cmds, 1), params);
+    }
+}
+//===========================================================================================================================
+primCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer face=-1;
+    list tmp=llParseString2List(name, ["."], []);
+    if(llGetListLength(tmp)>1){
+        name=llList2String(tmp, 0);
+        face=llList2Integer(tmp, 1);
+    }
+
+    integer i=llGetNumberOfPrims();
+    integer len=llStringLength(name);
+
+    if(cmd=="alpha"){
+        float alpha=llList2Float(params, 1);
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkAlpha(i, alpha, face);
+            }
+            --i;
+        }
+    }else if(cmd=="color"){
+        vector color=(vector)llList2String(params, 1);
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkColor(i, color, face);
+            }
+            --i;
+        }
+    }else if(cmd=="texture"){
+        integer index=llListFindList(textures, [llList2String(params, 1)]);
+        list tmp;
+        if(index!=-1){
+            tmp=[(key)llList2String(textures, index+1), //texture
+                 (vector)llList2String(textures, index+2),//repeat
+                 (vector)llList2String(textures, index+3),//offset
+                 llList2Float(textures, index+4)]; //rot
+        }else{        
+            tmp=[(key)llList2String(params, 1), //texture
+                 (vector)llList2String(params, 2),//repeat
+                 (vector)llList2String(params, 3),//offset
+                 llList2Float(params, 4)]; //rot
+        }
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, [PRIM_TEXTURE, face]+tmp);
+            }
+            --i;
+        }
+    }else if(cmd=="raw"){
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, llList2List(params, 1, -1));
+            }
+            --i;
+        }        
+    }
+}
+
+//===========================================================================================================================
+//Dump
+string dumpSettings(){
+    list cls=llList2ListStrided(llDeleteSubList(claws, 0,2), 0, -1, 4);
+    list fng=llList2ListStrided(llDeleteSubList(fingers, 0,0), 0, -1, 4);
+    
+    return 
+    llDumpList2String(IDs, ",")+";"+
+    (string)particleEnabled+";"+
+    particleColor+";"+
+    (string)currentClawRotOffset+";"+
+    llDumpList2String(cls, ";")+";"+
+    llDumpList2String(fng, ";");
+}
+//==========================================================================================================
+// Fingers
+fingerCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(fingers, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(fingers);
+        }
+        fingers=llListReplaceList(fingers, [name, 0]+llList2List(params, 1, 2), index, index+4); 
+    }else if(cmd=="set"){
+        if(index!=-1){
+            string textureName=llList2String(params, 1);
+            string prim=llList2String(fingers, index+2);
+            list l=llParseString2List(llList2String(fingers, index+3), [","], []);
+            integer texIndex=llListFindList(l, [textureName]);
+            if(texIndex!=-1){
+                primCtl("texture", [prim, textureName]);
+                fingers=llListReplaceList(fingers, [texIndex], index+1, index+1);               
+            }
+        }
+    }
+}
+//===========================================================================================================================
+//States
+stateCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(state_settings, [name]);
+
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(state_settings);
+        }
+        state_settings=llListReplaceList(state_settings, [name, llList2String(params, 1)], index, index+1);
+        state_enabled=state_enabled|(1<<(index/2));
+        state_on = state_on & (~(1<<(index/2)));
+
+    }else if(cmd=="switch"){
+        if(index!=-1){
+            integer switch=(llList2String(params, 1)=="on");
+            if(switch) state_on= state_on|(1<<(index/2));
+                else state_on = state_on & (~(1<<(index/2)));
+            reloadState(FALSE);
+        }
+
+    }else if(cmd=="enable"){
+        if(index!=-1){
+            integer switch=(llList2String(params, 1)=="on");
+            if(switch) state_enabled= state_enabled|(1<<(index/2));
+                else state_enabled = state_enabled & (~(1<<(index/2)));
+            reloadState(FALSE);
+        }
+    }
+}
+
+
+
+reloadState(integer _forced){
+    integer effective=state_on & state_enabled;
+
+    //Search
+    integer i=llGetListLength(state_settings)>>1; //length/2
+    while(((effective&(1<<--i))==0) && (i>0));
+    i=i*2;
+    
+    if(_forced || (i!=state_current)){
+        state_current=i; 
+        if(particleEnabled){
+            particleCtl("set", [llList2String(state_settings, i+1)]);
+        }
+    }
+}
+//===========================================================================================================================
+// Claws
+clawCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(claws, [name]);
+    
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(claws);
+        }
+        claws=llListReplaceList(claws, [name, (vector)llList2String(params,1), (vector)llList2String(params, 2), ZERO_VECTOR], index, index+2);
+            
+    }else if(cmd=="color"){
+        if(index!=-1){
+            vector color=(vector)llList2String(params, 1);
+            claws=llListReplaceList(claws, [color], index+3, index+3);
+            primCtl("color", [name+".1", color]);
+        }        
+    }else if(cmd=="set"){        
+        currentClawRotOffset=llList2Float(params, 0);
+        if(currentClawRotOffset>1.0) currentClawRotOffset=1.0;
+        if(currentClawRotOffset<0.0) currentClawRotOffset=0.0;    
+        integer i=llGetListLength(claws)-4;
+        while(i>=0){
+            //100%=out, 0%=sheath
+            vector vMin=llList2Vector(claws, i+1);
+            vector angle=llList2Vector(claws, i+2)*currentClawRotOffset;
+            rotation x_angle = llEuler2Rot( angle*DEG_TO_RAD );
+            rotation new_rot = x_angle*llEuler2Rot(vMin*DEG_TO_RAD);       
+            
+            primCtl("raw", [llList2String(claws, i), PRIM_ROTATION, new_rot/llGetLocalRot()]);
+            i-=4;
+        }
+    }
+}
+
+//==========================================================================================================
+// Textures
+textureCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(textures, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(textures);
+        }
+        textures=llListReplaceList(textures, [name]+llList2List(params, 1, 4), index, index+4); 
+    }
+}
+
+//==========================================================================================================
+particleCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(particles, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(particles);
+        }
+        particles=llListReplaceList(particles, [name]+llList2List(params, 1, 3), index, index+3); 
+    }else if(cmd=="color"){
+        particleColor=name;
+    }else if(cmd=="prim"){
+        integer i=llGetNumberOfPrims();       
+        while(i>=0){
+            if(llGetLinkName(i)==name){
+                particlePrim=i;
+                return;
+            }
+            --i;
+        }
+    }else if(cmd=="enable"){
+        particleEnabled=(name=="on");
+        if(!particleEnabled){
+            llSetTimerEvent(0.0);
+            llLinkParticleSystem(particlePrim, []); 
+        }
+    }else if(cmd=="set"){
+        if(name=="off"){
+            llSetTimerEvent(0.0);
+            llLinkParticleSystem(particlePrim, []); 
+        }else if(index!=-1){
+            
+            key id=llList2Key(particles, index+1);
+            vector size=(vector)llList2String(particles, index+2);
+            float rate=llList2Float(particles, index+3);
+            
+            particleSettings=[];
+            if(particleColor=="random"){ 
+                llSetTimerEvent(rate);
+                particleSettings=[PSYS_SRC_MAX_AGE, rate/2.0];
+            }else{
+                llSetTimerEvent(0.0);
+                particleSettings=[PSYS_SRC_MAX_AGE, 0];
+            }
+        
+            particleSettings+=[
+                PSYS_PART_MAX_AGE,3.0,
+                PSYS_PART_FLAGS,PSYS_PART_EMISSIVE_MASK|PSYS_PART_INTERP_COLOR_MASK,
+                PSYS_PART_END_COLOR, <0.5,0.5,0.5>,
+                PSYS_PART_START_SCALE,size,
+                PSYS_PART_END_SCALE,size,
+                PSYS_SRC_PATTERN, PSYS_SRC_PATTERN_DROP,
+                PSYS_SRC_BURST_RATE,rate,
+                PSYS_SRC_ACCEL, <0,0,0.0>,
+                PSYS_SRC_BURST_PART_COUNT,1,
+                PSYS_SRC_BURST_RADIUS,0.1,
+                PSYS_SRC_BURST_SPEED_MIN,0.1,
+                PSYS_SRC_BURST_SPEED_MAX,0.1,
+                PSYS_SRC_INNERANGLE,1.54,
+                PSYS_SRC_OUTERANGLE,1.55,
+                PSYS_SRC_OMEGA, <0,0,10>,
+                PSYS_SRC_TEXTURE, id,
+                PSYS_PART_START_ALPHA, 1.0,
+                PSYS_PART_END_ALPHA, 0.0
+            ];
+            particle_update();
+        }        
+    }
+}
+
+float scale_f(float f){
+    if (f < 0.0){ f += 1.0;
+    }else if(f > 1.0){ f -= 1.0;
+    }    
+    return f;
+}
+
+float Htorgb(float c, float p, float q){
+    if(c < 0.166667){
+        return p+(q-p)*6*c;
+    }else if(c >= 0.166667 && c < 0.5){
+        return q;
+    }else if(c >= 0.5 && c < 0.666667){
+        return p+(q-p)*6*(0.666667 - c);
+    }else{
+        return p;
+    }
+}
+
+vector TSL_To_RGB(vector color){
+    float p;
+    float q;
+    vector t = <scale_f(color.x + 0.333333), scale_f(color.x), scale_f(color.x - 0.333333)>;
+    
+    if (color.z < 0.5){
+        q = color.z * (1 + color.y);
+    }else{
+        q = color.z + color.y - (color.z * color.y);
+    }
+    
+    p = 2*color.z - q;
+    
+    return <Htorgb(t.x, p, q), Htorgb(t.y, p, q), Htorgb(t.z, p, q)>;
+}
+
+
+particle_update(){
+    vector color;
+    if(particleColor=="random"){
+        color=TSL_To_RGB(<llFrand(1.0), 1.0, 0.5>);
+    }else{
+        color=(vector)particleColor;
+    }
+    llLinkParticleSystem(particlePrim, [PSYS_PART_START_COLOR, color]+particleSettings);
+}
+//======================================================================================
+//======================================================================================
+default
+{
+    state_entry(){
+        owner=llGetOwner();
+        kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+    }
+
+    changed(integer change){
+        if(change & CHANGED_OWNER) llResetScript();
+        if(change & CHANGED_INVENTORY) llResetScript(); 
+    }
+
+    dataserver(key query_id, string data){
+        if(query_id == kQuery){
+            if(data == EOF){
+                ++current_notecard;
+                string note=llGetScriptName()+"_"+NOTECARD+(string)current_notecard;
+                if(llGetInventoryType(note)!=INVENTORY_NONE){
+                    kQuery = llGetNotecardLine(note, iLine=0);
+                }else{
+                    state run;
+                }
+            }else{
+                ++iLine;
+                if(current_notecard!=0){
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD+(string)current_notecard, iLine);
+                }else{
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+                }
+
+                data=llStringTrim(data, STRING_TRIM);
+                if(llGetSubString(data, 0,0)!="#"){
+                    list l=llParseString2List(data, [":"], []);
+                    processCommand(llList2String(l, 0), llList2String(l, 1));
+                }
+            }
+        }
+    }
+}
+
+//======================================================================================
+state run
+{
+    state_entry(){
+        llLinkParticleSystem(particlePrim, []); 
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+        stateCtl("switch", ["default", "on"]);
+        reloadState(TRUE);
+        showFreeMemory();
+        autoReset=(CHANGED_OWNER|CHANGED_INVENTORY|CHANGED_LINK);
+    }
+
+    timer(){
+        particle_update();
+    }
+
+    changed(integer change){
+        if((change&autoReset)!=0)llResetScript();
+        if(change&CHANGED_TEXTURE){
+            autoReset=(CHANGED_OWNER|CHANGED_LINK);
+        }
+    }
+    
+    listen(integer channel, string name, key _id, string message){
+        if(llGetOwnerKey(_id)==owner){
+            list temp=llParseString2List(llStringTrim(message, STRING_TRIM), [":"], []);
+            if(llListFindList(IDs, [llList2String(temp, 0)])!=-1){
+                processCommand(llList2String(temp, 1), llList2String(temp, 2));
+            }
+        }
+    }    
+}
