@@ -1,0 +1,577 @@
+
+//========== Commons
+integer CHANNEL;
+integer giveDebug=TRUE;
+integer giveFeedback;
+integer listenHandle;
+list IDs;
+key owner;
+
+//========== Notecard
+string NOTECARD="settings";
+key kQuery;
+integer current_notecard;
+integer iLine;
+//===========================================================================================================================
+rotation ROT_OPEN=<0.00000, 0.00000, 0.00000, 1.00000>;
+rotation ROT_CLOSE=<0.00000, 0.00000, 0.70711, 0.70711>;
+rotation ROT_MENU=<0.00000, 0.00000, 1.00000, 0.00000>;
+
+integer currentState;
+    integer STATE_CLOSE=0;
+    integer STATE_MENU =1;
+    integer STATE_OPEN =2;
+    
+//================
+vector COLOR_ENABLED;
+vector COLOR_DISABLED;
+key TEXTURE_LINE;
+key TEXTURE_DEADLINE;
+key TEXTURE_CROSS;
+//================
+list menus;
+string menuPrim;
+integer menuLink;
+//================
+list actions;
+list queries;
+//================
+string currentID;
+string currentEffectiveID;
+//================
+list pickerButtons;
+integer currentColorPicker;
+vector currentColorPickerColor;
+//================
+list currentButtons;
+list currentButtonsID;
+
+//===========================================================================================================================
+//===========================================================================================================================
+showFreeMemory(){
+    integer freemem = llGetFreeMemory();
+    if(llToLower( "Ü" ) == "Ü"){
+        integer memory = (integer)((float)freemem * 100.0 / 16384.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). LSO" );
+    }else{
+        integer memory = (integer)((float)freemem * 100.0 / 65536.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). Mono" );
+    }
+}
+
+integer getChannel(string _chan){
+    if(_chan=="dynamic"){
+        return -8388608-(integer)("0x"+llList2String(llParseString2List(llGetOwner(), ["-"], []), 2));
+    }else return (integer)_chan;
+}
+
+debug(string s){
+    if(giveDebug) llOwnerSay(s);
+}
+feedback(string s){
+    if(giveFeedback!=0) llOwnerSay(s);
+}
+
+
+processCommand(string cmd, string param, integer line){
+    list cmds=llParseString2List(llToLower(cmd), ["^"], []);
+    list params=llParseString2List(param, ["^"], []);
+    cmd=llList2String(cmds, 0);
+    param=llList2String(params, 0);
+    if(cmd=="channel"){
+        CHANNEL=getChannel(param);
+        if(listenHandle!=-1) llListenRemove(listenHandle);
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+    }else if(cmd=="id"){
+        IDs=llParseString2List(param, [","], []);
+    }else if(cmd=="reset"){
+        llResetScript();
+    }else if(cmd=="menu"){
+        menuCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="action"){
+        actionCtl(llList2String(cmds, 1), line);        
+    }else if(cmd=="button"){
+        buttonCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="load"){
+        loadButtons(params);
+    }
+}
+//===========================================================================================================================
+loadButtons(list params){
+    params=llParseString2List(llList2String(params, 0), [";"], []);
+    integer index=llListFindList(llParseString2List(llList2String(params, 0), [","], []), [currentEffectiveID]);
+    if(index!=-1){
+        index=llGetListLength(currentButtons);
+        while(--index>=0){
+            string type=llList2String(currentButtonsID, index*2);
+            string sid=llList2String(currentButtonsID, (index*2)+1);
+            if(sid!="-1"){
+                list ids=llParseString2List(sid, [","], []);
+                integer prim=llList2Integer(currentButtons, index);
+                if(type=="bt"){
+                    integer i=0;
+                    llSetLinkColor(prim, COLOR_DISABLED, ALL_SIDES);
+                    for(i=0; i<llGetListLength(ids); ++i){
+                        integer id=llList2Integer(ids, i);
+                        if(llList2Integer(params, id+1)==1){ //Rechange only if enable
+                            llSetLinkColor(prim, COLOR_ENABLED,  i);
+                        }                    
+                    }
+                }else if(type=="pb"){
+                    integer i=0;
+                    llSetLinkColor(prim, COLOR_DISABLED, ALL_SIDES);
+                    for(i=0; i<llGetListLength(ids); ++i){
+                        integer id=llList2Integer(ids, i);
+                        llSetLinkColor(prim, (vector)llList2String(params, id+1),  (i*2)+1);
+                    }                
+                }else if(type=="sw"){
+                    integer id=llList2Integer(ids, 0);
+                    llSetLinkColor(prim, COLOR_DISABLED, ALL_SIDES);
+                    llSetLinkColor(prim, COLOR_ENABLED,  llList2Integer(params, id+1));
+                }else if(type=="sb"){
+                    integer id=llList2Integer(ids, 0);
+                        llSetLinkPrimitiveParamsFast(prim, 
+                            [PRIM_TEXTURE, 1, TEXTURE_LINE, <0.0,1.0,0.0>, <0.0, llList2Float(params, id+1), 0.0>, 90.0*DEG_TO_RAD]);  
+                }
+            }
+        }        
+    }
+}
+//===========================================================================================================================
+buttonCtl(string cmd, list params){
+    if(cmd=="colors"){
+        COLOR_ENABLED=(vector)llList2String(params, 0);
+        COLOR_DISABLED=(vector)llList2String(params, 1);
+    }else if(cmd=="line"){
+        TEXTURE_LINE=llList2Key(params, 0);
+    }else if(cmd=="cross"){
+        TEXTURE_CROSS=llList2Key(params, 0);
+    }else if(cmd=="deadline"){
+        TEXTURE_DEADLINE=llList2Key(params, 0);
+    }
+}
+
+menuCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(menus, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(menus);
+        }
+        menus=llListReplaceList(menus, [name]+llList2List(params, 1, 4), index, index+4);
+        //Force Hide
+        integer i=llGetNumberOfPrims();
+        while(i>=0){
+            if(llGetLinkName(i)==name){                 
+                vector pos=llList2Vector(llGetLinkPrimitiveParams(i, [PRIM_POS_LOCAL]),0);
+                llSetLinkAlpha(i, 0.0, ALL_SIDES);
+                llSetLinkPrimitiveParamsFast(i, [PRIM_POS_LOCAL, <0.2, pos.y, pos.z>]);
+            }
+            --i;
+        }
+    }else if(cmd=="prim"){
+        menuPrim=llList2String(params, 0);
+        integer i=llGetNumberOfPrims();
+        while(i>=0){
+            if(llGetLinkName(i)==menuPrim){
+                menuLink=i; return;
+            }
+            --i;
+        }
+    }
+}
+
+actionCtl(string cmd, integer line){
+    integer index=llListFindList(actions, [cmd]);
+    if(index==-1){
+        index=llGetListLength(actions);
+    }
+    actions=llListReplaceList(actions, [cmd, line], index, index+1);
+}
+
+switchHUD(){
+    if(currentState==STATE_CLOSE){ //Opening menu
+        llSetLocalRot(ROT_MENU);
+        currentState=STATE_MENU;
+    }else{ //closing HUD
+        llSetLocalRot(ROT_CLOSE);
+        currentState=STATE_CLOSE;
+        llSetLinkColor(menuLink, COLOR_DISABLED, ALL_SIDES);
+    }
+}
+
+processMenu(integer link, integer face){
+    llSetLinkColor(link, COLOR_DISABLED, ALL_SIDES);
+    llSetLinkColor(link, COLOR_ENABLED, face);
+    integer index=llListFindList(menus, [(string)face]);
+    string nextID=llList2String(menus, index+1);
+    string oldID="-";
+    if(currentState!=STATE_OPEN){
+        llSetLocalRot(ROT_OPEN);
+        currentState=STATE_OPEN;
+    }
+    if(nextID!=currentID){
+        if(currentID!=""){//Hide Old menu
+            oldID=currentID;
+        }
+        
+        currentID=nextID;
+        currentEffectiveID=currentID;
+        
+        pickerButtons=[];
+        currentButtons=[];
+        currentButtonsID=[];
+        
+        //Show new
+        integer i=llGetNumberOfPrims();
+        while(i>=0){
+            list l=llGetLinkPrimitiveParams(i, [PRIM_NAME, PRIM_POS_LOCAL, PRIM_DESC]);
+            string primName=llList2String(l, 0);
+            
+            if(primName==oldID){
+                vector pos=llList2Vector(l, 1);
+                llSetLinkAlpha(i, 0.0, ALL_SIDES);
+                llSetLinkPrimitiveParamsFast(i, [PRIM_POS_LOCAL, <0.2, pos.y, pos.z>]);
+            }else if(primName==currentID){
+                vector pos=llList2Vector(l, 1);
+                list l=llParseString2List(llList2String(l, 2), [":"], []);
+                string type=llList2String(l, 0);
+                
+                currentButtons+=i;
+                currentButtonsID+=[type, llList2String(l, 2)];
+                
+                if(type=="id"){
+                    list idActions=llParseString2List(llList2String(l, 1), [";"], []);
+                    integer index=llListFindList(llGetLinkPrimitiveParams(i, [PRIM_COLOR, ALL_SIDES]), [COLOR_ENABLED])/2;
+                    currentEffectiveID=llList2String(idActions, index);
+                    
+                }else if(type=="pb"){
+                    llSetLinkPrimitiveParamsFast(i, [
+                        PRIM_COLOR, 0, COLOR_DISABLED, 1.0,
+                        PRIM_COLOR, 2, COLOR_DISABLED, 1.0,
+                        PRIM_COLOR, 4, COLOR_DISABLED, 1.0,
+                        PRIM_COLOR, 6, COLOR_DISABLED, 1.0 ]);
+                        
+                }else if(type=="cp"){
+                    currentColorPicker=i;
+                }
+                
+                llSetLinkAlpha(i, 1.0, ALL_SIDES);
+                llSetLinkPrimitiveParamsFast(i, [PRIM_POS_LOCAL, <0.0, pos.y, pos.z>]);
+            }
+            --i;
+        }
+        llSay(CHANNEL, currentEffectiveID+":dump");  
+    }
+}
+//====================================================================================
+string strReplace(string str, string search, string replace) {
+    return llDumpList2String(llParseStringKeepNulls((str = "") + str, [search], []), replace);
+}
+vector RGBtoHSV( vector rgb )
+{
+    float R = rgb.x;
+    if (R<0)        // catch malformed input
+        R=0;
+    else if (R>1)
+        R=1;
+    float G = rgb.y;
+    if (G<0)        // catch malformed input
+        G=0;
+    else if (G>1)
+        G=1;
+    float B = rgb.z;
+    if (B<0)        // catch malformed input
+        B=0;
+    else if (B>1)
+        B=1;
+ 
+    float H;
+    float S;
+    float V;
+ 
+    list rgbList = [R, G, B]; // list used to get min and max
+ 
+    float min;
+    float max;
+    float achromatic;  // =1 if R=G=B
+    float delta;
+ 
+    vector hsv;  // the return HSV vector
+ 
+    min = llListStatistics(LIST_STAT_MIN, rgbList); //MIN of ( R, G, B );
+    max = llListStatistics(LIST_STAT_MAX, rgbList); //MAX of ( R, G, B );
+    if (R==G && G==B)
+        achromatic = 1;  // it is a shade of grey, white or black
+    else
+        achromatic = 0;
+ 
+    V = max;                    // V = brightness Value form 0 to 1
+    delta = max - min;
+ 
+    if( max != 0 )
+        S = delta / max;        // S = saturation from 0 to 1
+    else {
+        // R = G = B = 0        // S = 0, V = 0, H = 0
+        S = 0;                  
+        V = 0;                  
+        H = 0;
+ 
+        hsv.x = H;
+        hsv.y = S;
+        hsv.z = V;
+        return hsv;             //H = S = V = 0
+    }
+ 
+    if (achromatic == 1) H = 0;
+    else if( R == max )  H = 0 + ( G - B ) / delta;    // between red & yellow
+    else if( G == max )  H = 2 + ( B - R ) / delta;    // between yellow & cyan
+    else H = 4 + ( R - G ) / delta;    // between cyan & red
+ 
+ 
+    H *= 60;                          // H is traditionally a figure between 0 and 360 degrees
+    if( H < 0 )
+        H += 360;
+ 
+    hsv.x = H;
+    hsv.y = S;
+    hsv.z = V;
+    return hsv;
+}
+
+
+
+vector HSVtoRGB( vector hsv ){ 
+     float H = hsv.x;
+     if (H<0.0) H=0;       // catch malformed H input
+     else if (H>=360.0) H=0;
+     
+     float S = hsv.y;
+     if (S<0.0) S=0;       // catch malformed S input
+     else if (S>1.0) S=1;
+     
+     float V = hsv.z;
+     if (V<0.0) V=0;       // catch malformed V input
+     else if (V>1.0) V=1;
+ 
+ 
+    if( S == 0 ) {  // achromatic (grey) simply set R,G, & B = Value 
+        return <V,V,V>;
+    }
+ 
+    H /= 60;              // Hue factored into range 0 to 5
+    integer i = llFloor( H );      // integer floor of Hue
+    float f = H - i;            // factorial part of H
+ 
+    float p = V * ( 1 - S );
+    float q = V * ( 1 - S * f );
+    float t = V * ( 1 - S * ( 1 - f ) );
+ 
+    vector rgb;
+    if (i==0){          rgb = <V,t,p>;
+    } else if (i==1){   rgb = <q,V,p>;
+    } else if (i==2){   rgb = <p,V,t>;
+    } else if (i==3){   rgb = <p,q,V>;
+    } else if (i==4){   rgb = <t,p,V>;
+    } else {            rgb = <V,p,q>;
+    }
+ 
+    return rgb;
+}
+
+loadColorPicker(integer link, vector color){
+    currentColorPickerColor=color;
+    vector hsv=RGBtoHSV(color);
+    llSetLinkPrimitiveParamsFast(link, [PRIM_TEXTURE, 1, TEXTURE_CROSS, <1.0,1.0,0.0>, <1.0-(hsv.x/360.0), 1.0-hsv.y, 0.0>, 180*DEG_TO_RAD]);
+    llSetLinkColor(link, HSVtoRGB(<hsv.x, hsv.y, 1.0>), 2);
+    llSetLinkColor(link, <hsv.z, hsv.z, hsv.z>, 0);
+    llSetLinkPrimitiveParamsFast(link, [PRIM_TEXTURE, 4, TEXTURE_LINE, <0.0,1.0,0.0>, <hsv.z, hsv.z, 0>, 90.0*DEG_TO_RAD]); 
+    
+    integer i=0;
+    while(i<llGetListLength(pickerButtons)){
+        list prim=llParseString2List(llList2String(pickerButtons, i), [":"], []);
+        integer link=llList2Integer(prim, 0);
+        integer face=llList2Integer(prim, 1);
+        llSetLinkColor(link, currentColorPickerColor, face+1);
+        
+        string action=strReplace(llList2String(pickerButtons, i+1), "%i", currentEffectiveID); 
+        action=strReplace(action, "%v", (string)currentColorPickerColor);  
+        llSay(CHANNEL, action); 
+        i+=2;
+    }
+}
+
+processTouch(integer num, string type, integer face, string action, vector coord, integer reload){
+    list buttonActions=llParseString2List(action, ["^"], []);
+    if(type=="id"){
+        list l=llParseString2List(action, [";"], []);
+        currentEffectiveID=llList2String(l, face);
+        llSetLinkColor(num, COLOR_DISABLED, ALL_SIDES );
+        llSetLinkColor(num, COLOR_ENABLED, face );         
+        pickerButtons=[];
+    }else if(type=="bt"){//regular button
+        vector color=llList2Vector(llGetLinkPrimitiveParams(num, [PRIM_COLOR, face]),0);
+        action=strReplace(llList2String(buttonActions, face), "%i", currentEffectiveID);  
+        if(color==COLOR_ENABLED){
+            action=strReplace(action, "%v", "off");
+            llSetLinkColor(num, COLOR_DISABLED, face );
+        }else{
+            action=strReplace(action, "%v", "on");
+            llSetLinkColor(num, COLOR_ENABLED, face );
+        }      
+        llSay(CHANNEL, action);
+    }else if(type=="sw"){//switch
+        action=strReplace(llList2String(buttonActions, face), "%i", currentEffectiveID);  
+        llSetLinkColor(num, COLOR_DISABLED, ALL_SIDES );
+        llSetLinkColor(num, COLOR_ENABLED, face );
+        llSay(CHANNEL, action);
+    }else if(type=="sb"){//scroll bar
+        if(face==4){
+            action=strReplace(llList2String(buttonActions,1), "%i", currentEffectiveID);  
+            llSetLinkTexture(num, TEXTURE_DEADLINE, 1);
+            llSetLinkColor(num, COLOR_ENABLED, 4);
+        }else{
+            llSetLinkColor(num, COLOR_DISABLED, 4);
+            action=strReplace(llList2String(buttonActions,0), "%i", currentEffectiveID);  
+            vector texPos=llList2Vector(llGetLinkPrimitiveParams(num, [PRIM_TEXTURE, 1]),2);
+            if(face==1){ //direct click
+                texPos=<coord.y, coord.x, 0>;        
+            }else if(face==2){ //dec
+                texPos.y-=0.051;
+            
+            }else if(face==3){//inc
+                texPos.y+=0.051;
+            
+            }        
+            if(texPos.y<0.05) texPos.y=0;
+            if(texPos.y>0.95) texPos.y=1.0;
+            llSetLinkPrimitiveParamsFast(num, [PRIM_TEXTURE, 1, TEXTURE_LINE, <0.0,1.0,0.0>, <0, texPos.y, 0>, 90.0*DEG_TO_RAD]); 
+            action=strReplace(action, "%v", (string)texPos.y);  
+        }
+        llSay(CHANNEL, action);
+    }else if(type=="cp"){//color picker
+        list l=llGetLinkPrimitiveParams(num, [PRIM_TEXTURE, 1, PRIM_TEXTURE, 4]);
+        vector texPos1=llList2Vector(l,2);
+        vector texPos2=llList2Vector(l,6);
+        vector hsv;
+        if(face==1){
+            hsv=<(1.0-coord.x)*360.0, (1.0-coord.y), texPos2.x>;
+        }else if(face==4){
+            if(coord.x<0.05) coord.x=0;
+            if(coord.x>0.95) coord.x=1.0;
+            hsv=<(1.0-texPos1.x)*360.0, (1.0-texPos1.y), coord.x>;
+        }
+        
+        loadColorPicker(currentColorPicker, HSVtoRGB(hsv));
+    }else if(type=="pb"){//color picker buttons
+        face=(face/2)*2;
+        integer index=llListFindList(pickerButtons, [(string)num+":"+(string)face]);
+        if(index==-1){            
+            if(pickerButtons==[]){ //Empty list so we load first selected color
+                vector color=llList2Vector(llGetLinkPrimitiveParams(num, [PRIM_COLOR, face+1]), 0);
+                pickerButtons+=[(string)num+":"+(string)face, llList2String(buttonActions, face/2)];
+                loadColorPicker(currentColorPicker, color);
+            }else{
+                pickerButtons+=[(string)num+":"+(string)face, llList2String(buttonActions, face/2)];
+                loadColorPicker(currentColorPicker, currentColorPickerColor);
+            }
+            llSetLinkColor(num, COLOR_ENABLED, face);
+        }else{
+            llSetLinkColor(num, COLOR_DISABLED, face);
+            pickerButtons=llDeleteSubList(pickerButtons, index, index+1);
+        }    
+    }
+    if(reload) llSay(CHANNEL, currentEffectiveID+":dump");       
+}
+//===========================================================================================================================
+//===========================================================================================================================
+default
+{
+    state_entry(){
+        owner=llGetOwner();
+        kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+    }
+
+    changed(integer change){
+        if(change & CHANGED_OWNER) llResetScript();
+        if(change & CHANGED_INVENTORY) llResetScript(); 
+    }
+     
+    dataserver(key query_id, string data){
+        if(query_id == kQuery){
+            if(data == EOF){
+                state run;
+            }else{
+                ++iLine;
+                kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+
+                data=llStringTrim(data, STRING_TRIM);
+                if(llGetSubString(data, 0,0)!="#"){
+                    list l=llParseString2List(data, ["|"], []);
+                    processCommand(llList2String(l, 0), llList2String(l, 1), iLine-1);
+                }
+            }
+        }
+    }
+}
+//===========================================================================================================================
+state run
+{
+    state_entry(){
+        showFreeMemory(); 
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+        debug("channel is: "+(string)CHANNEL);   
+    }
+
+    touch_start(integer index){        
+        integer num=llDetectedLinkNumber(0);
+        integer face=llDetectedTouchFace(0);
+        vector touchST=llDetectedTouchST(0);
+        if(num==1){
+            if(face==1) switchHUD();    
+        }else if(llGetLinkName(num)==menuPrim){
+            processMenu(num, face);
+        }else{
+            string desc=llList2String(llGetLinkPrimitiveParams(num, [PRIM_DESC]), 0);
+            list l=llParseString2List(desc, [":"], []);
+            string type=llList2String(l, 0);
+            string action=llList2String(l, 1);
+            integer reload=llList2String(l, 3)=="reload";
+            if(type=="id"){
+                processTouch(num, type, face, action, touchST, reload);
+            }else if(type=="cp"){
+                processTouch(num, type, face, action, touchST, reload);
+            }else{
+                integer actionIndex=llListFindList(actions, [action]);
+                if(actionIndex!=-1){
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, llList2Integer(actions, actionIndex+1));
+                    queries+=[kQuery, (string)num+"|"+type+"|"+(string)face+"|"+(string)touchST+"|"+(string)reload];
+                }
+            }
+        }
+    }
+    
+    changed(integer change){
+        if(change&CHANGED_OWNER) llResetScript();
+        if(change&CHANGED_LINK) llResetScript();
+        if(change&CHANGED_INVENTORY) llResetScript();    
+    }
+    
+    dataserver(key query_id, string data){
+        integer index=llListFindList(queries, [query_id]);
+        if(index!=-1){
+            list l=llParseString2List(llList2String(queries, index+1), ["|"], []);
+            processTouch(llList2Integer(l, 0), llList2String(l, 1), llList2Integer(l, 2), llList2String(llParseString2List(data, ["|"], []), 1),  (vector)llList2String(l, 3), llList2Integer(l, 4));
+            queries=llDeleteSubList(queries, index, index+1);
+        }
+    }
+    listen(integer channel, string name, key _id, string message){
+        if(llGetOwnerKey(_id)==owner){
+            list temp=llParseString2List(llStringTrim(message, STRING_TRIM), [":"], []);
+            if(llListFindList(IDs, [llList2String(temp, 0)])!=-1){
+                processCommand(llList2String(temp, 1), llList2String(temp, 2), -1);
+            }
+        }
+    }   
+
+}
