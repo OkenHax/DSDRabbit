@@ -1,0 +1,291 @@
+//========== Commons
+integer CHANNEL;
+integer giveDebug;
+integer giveFeedback;
+integer listenHandle;
+list IDs;
+key owner;
+
+//========== Notecard
+string NOTECARD="settings";
+key kQuery;
+integer current_notecard;
+integer iLine;
+//=========================================== 
+integer autoReset;
+//=========================================== 
+// Claws
+list claws; //[name, base_rot, offset_rot, color]
+float currentClawRotOffset;
+//=========================================== 
+// Textures
+list textures; //[name, uuid, scale, offset]
+//=========================================== 
+// Fingers
+list fingers; //[name, current, prim, lst_tex]
+//===========================================================================================================================
+//===========================================================================================================================
+
+showFreeMemory(){
+    integer freemem = llGetFreeMemory();
+    if(llToLower( "Ü" ) == "Ü"){
+        integer memory = (integer)((float)freemem * 100.0 / 16384.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). LSO" );
+    }else{
+        integer memory = (integer)((float)freemem * 100.0 / 65536.0);
+        debug( (string)memory + "% memory free ("+(string)freemem+" Byte). Mono" );
+    }
+}
+
+integer getChannel(string _chan){
+    if(_chan=="dynamic"){
+        return -8388608-(integer)("0x"+llList2String(llParseString2List(llGetOwner(), ["-"], []), 2));
+    }else return (integer)_chan;
+}
+
+debug(string s){ 
+    if(giveDebug) llOwnerSay(s);
+}
+feedback(string s){
+    if(giveFeedback!=0) llOwnerSay(s);
+}
+
+
+processCommand(string cmd, string param){ 
+    list cmds=llParseString2List(llToLower(cmd), [";"], []);
+    list params=llParseString2List(param, [";"], []);
+    cmd=llList2String(cmds, 0);
+    param=llList2String(params, 0);
+    if(cmd=="channel"){
+        CHANNEL=getChannel(param);
+        if(listenHandle!=-1) llListenRemove(listenHandle);
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+    }else if(cmd=="reset"){
+        llResetScript();
+    }else if(cmd=="id"){
+        IDs=llParseString2List(param, [","], []);
+    }else if(cmd=="dump"){
+        llSay(CHANNEL, "hud:load:"+dumpSettings());
+    }else if(cmd=="feedback"){
+        if(param=="on") giveFeedback++; else giveFeedback--;
+    }else if(cmd=="debug"){
+        giveDebug=(param=="on");
+    }else if(cmd=="prim"){
+        primCtl(llList2String(cmds, 1), params);      
+    }else if(cmd=="texture"){
+        textureCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="claw"){
+        clawCtl(llList2String(cmds, 1), params);
+    }else if(cmd=="finger"){
+        fingerCtl(llList2String(cmds, 1), params);
+    }
+}
+//===========================================================================================================================
+primCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer face=-1;
+    list tmp=llParseString2List(name, ["."], []);
+    if(llGetListLength(tmp)>1){
+        name=llList2String(tmp, 0);
+        face=llList2Integer(tmp, 1);
+    }
+
+    integer i=llGetNumberOfPrims();
+    integer len=llStringLength(name);
+
+    if(cmd=="alpha"){
+        float alpha=llList2Float(params, 1);
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkAlpha(i, alpha, face);
+            }
+            --i;
+        }
+    }else if(cmd=="color"){
+        vector color=(vector)llList2String(params, 1);
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkColor(i, color, face);
+            }
+            --i;
+        }
+    }else if(cmd=="texture"){
+        integer index=llListFindList(textures, [llList2String(params, 1)]);
+        list tmp;
+        if(index!=-1){
+            tmp=[(key)llList2String(textures, index+1), //texture
+                 (vector)llList2String(textures, index+2),//repeat
+                 (vector)llList2String(textures, index+3),//offset
+                 llList2Float(textures, index+4)]; //rot
+        }else{        
+            tmp=[(key)llList2String(params, 1), //texture
+                 (vector)llList2String(params, 2),//repeat
+                 (vector)llList2String(params, 3),//offset
+                 llList2Float(params, 4)]; //rot
+        }
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, [PRIM_TEXTURE, face]+tmp);
+            }
+            --i;
+        }
+    }else if(cmd=="raw"){
+        while(i>=0){
+            if(llGetSubString(llGetLinkName(i), 0, len-1)==name){
+                llSetLinkPrimitiveParamsFast(i, llList2List(params, 1, -1));
+            }
+            --i;
+        }        
+    }
+}
+//===========================================================================================================================
+//Dump
+string dumpSettings(){
+    list cls=llList2ListStrided(llDeleteSubList(claws, 0,2), 0, -1, 4);
+    list fng=llList2ListStrided(llDeleteSubList(fingers, 0,0), 0, -1, 4);
+    
+    return 
+    llDumpList2String(IDs, ",")+";"+
+    (string)currentClawRotOffset+";"+
+    llDumpList2String(cls, ";")+";"+
+    llDumpList2String(fng, ";");
+}
+//===========================================================================================================================
+// Claws
+clawCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(claws, [name]);
+    
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(claws);
+        }
+        claws=llListReplaceList(claws, [name, (vector)llList2String(params,1), (vector)llList2String(params, 2), ZERO_VECTOR], index, index+2);
+            
+    }else if(cmd=="color"){
+        if(index!=-1){
+            vector color=(vector)llList2String(params, 1);
+            claws=llListReplaceList(claws, [color], index+3, index+3);
+            primCtl("color", [name+".1", color]);
+        }        
+    }else if(cmd=="set"){        
+        currentClawRotOffset=llList2Float(params, 0);
+        if(currentClawRotOffset>1.0) currentClawRotOffset=1.0;
+        if(currentClawRotOffset<0.0) currentClawRotOffset=0.0;    
+        integer i=llGetListLength(claws)-4;
+        while(i>=0){
+            //100%=out, 0%=sheath
+            vector vMin=llList2Vector(claws, i+1);
+            vector angle=llList2Vector(claws, i+2)*currentClawRotOffset;
+            rotation x_angle = llEuler2Rot( angle*DEG_TO_RAD );
+            rotation new_rot = x_angle*llEuler2Rot(vMin*DEG_TO_RAD);       
+            
+            primCtl("raw", [llList2String(claws, i), PRIM_ROTATION, new_rot/llGetLocalRot()]);
+            i-=4;
+        }
+    }
+}
+
+//==========================================================================================================
+// Textures
+textureCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(textures, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(textures);
+        }
+        textures=llListReplaceList(textures, [name]+llList2List(params, 1, 4), index, index+4); 
+    }
+}
+//==========================================================================================================
+// Fingers
+fingerCtl(string cmd, list params){
+    string name=llList2String(params, 0);
+    integer index=llListFindList(fingers, [name]);
+    if(cmd=="add"){
+        if(index==-1){
+            index=llGetListLength(fingers);
+        }
+        fingers=llListReplaceList(fingers, [name, 0]+llList2List(params, 1, 2), index, index+4); 
+    }else if(cmd=="set"){
+        if(index!=-1){
+            string textureName=llList2String(params, 1);
+            string prim=llList2String(fingers, index+2);
+            list l=llParseString2List(llList2String(fingers, index+3), [","], []);
+            integer texIndex=llListFindList(l, [textureName]);
+            if(texIndex!=-1){
+                primCtl("texture", [prim, textureName]);
+                fingers=llListReplaceList(fingers, [texIndex], index+1, index+1);               
+            }
+        }
+    }
+}
+//======================================================================================
+//======================================================================================
+default
+{
+    state_entry(){
+        owner=llGetOwner();
+        kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+    }
+
+    changed(integer change){
+        if(change & CHANGED_OWNER) llResetScript();
+        if(change & CHANGED_INVENTORY) llResetScript(); 
+    }
+
+    dataserver(key query_id, string data){
+        if(query_id == kQuery){
+            if(data == EOF){
+                ++current_notecard;
+                string note=llGetScriptName()+"_"+NOTECARD+(string)current_notecard;
+                if(llGetInventoryType(note)!=INVENTORY_NONE){
+                    kQuery = llGetNotecardLine(note, iLine=0);
+                }else{
+                    state run;
+                }
+            }else{
+                ++iLine;
+                if(current_notecard!=0){
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD+(string)current_notecard, iLine);
+                }else{
+                    kQuery = llGetNotecardLine(llGetScriptName()+"_"+NOTECARD, iLine);
+                }
+
+                data=llStringTrim(data, STRING_TRIM);
+                if(llGetSubString(data, 0,0)!="#"){
+                    list l=llParseString2List(data, [":"], []);
+                    processCommand(llList2String(l, 0), llList2String(l, 1));
+                }
+            }
+        }
+    }
+}
+
+//======================================================================================
+state run
+{
+    state_entry(){
+        listenHandle=llListen(CHANNEL, "", NULL_KEY, "");
+        showFreeMemory();
+        autoReset=(CHANGED_OWNER|CHANGED_INVENTORY|CHANGED_LINK);
+    }
+
+
+    changed(integer change){
+        if((change&autoReset)!=0)llResetScript();
+        if(change&CHANGED_TEXTURE){
+            autoReset=(CHANGED_OWNER|CHANGED_LINK);
+        }
+    }
+    
+    listen(integer channel, string name, key _id, string message){
+        if(llGetOwnerKey(_id)==owner){
+            list temp=llParseString2List(llStringTrim(message, STRING_TRIM), [":"], []);
+            if(llListFindList(IDs, [llList2String(temp, 0)])!=-1){
+                processCommand(llList2String(temp, 1), llList2String(temp, 2));
+            }
+        }
+    }
+}
